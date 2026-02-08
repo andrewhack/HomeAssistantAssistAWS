@@ -63,6 +63,8 @@ user_locale = "US"  # Default locale
 home_assistant_url = os.environ.get('home_assistant_url', "").strip("/")
 apl_document_token = str(uuid.uuid4())
 assist_input_entity = os.environ.get('assist_input_entity', "input_text.assistant_input")
+home_assistant_agent_id = os.environ.get('home_assistant_agent_id', None)
+home_assistant_language = os.environ.get('home_assistant_language', None)
 home_assistant_room_recognition = str(os.environ.get('home_assistant_room_recognition', 'False')).lower()
 home_assistant_kioskmode = str(os.environ.get('home_assistant_kioskmode', 'False')).lower()
 ask_for_further_commands = str(os.environ.get('ask_for_further_commands', 'False')).lower()
@@ -274,9 +276,6 @@ def process_conversation(query):
     if not home_assistant_url:
         logger.error("Please set 'home_assistant_url' AWS Lambda Functions environment variable.")
         return globals().get("alexa_speak_error")
-    
-    home_assistant_agent_id = os.environ.get("home_assistant_agent_id", None)
-    home_assistant_language = os.environ.get("home_assistant_language", None)
         
     try:
         headers = {
