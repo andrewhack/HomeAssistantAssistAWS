@@ -192,7 +192,7 @@ Despite the Alexa documentation’s disclaimer, however, `Let’s Encrypt` certi
 **Important:** You must use a `valid/trusted SSL certificate` for account linking to work. Self-signed certificates will not work, but you can use a free `Let’s Encrypt` certificate.
   - **Your Client ID**:
     - https://pitangui.amazon.com/ if you are in Americas.
-    - https://layla.amazon.com/ if you are in Europe.
+    - https://layla.amazon.com/ if you are in Europe (If not work, use: `https://pitangui.amazon.com/` instead).
     - https://alexa.amazon.co.jp/ if you are in Japan, Australia _(not verified yet)_.
 
     **Important:** The trailing slash is important here _(don’t change the URL above)_.
