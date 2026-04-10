@@ -11,6 +11,15 @@ import logging
 import json
 import random
 import asyncio
+
+
+def pick_random_phrase(key):
+    """Pick a random phrase from a semicolon-separated locale string."""
+    raw = globals().get(key, "")
+    if not raw:
+        return ""
+    phrases = [p.strip() for p in raw.split(";") if p.strip()]
+    return random.choice(phrases) if phrases else raw
 import uuid
 import requests
 import requests.exceptions
@@ -117,7 +126,7 @@ class LaunchRequestHandler(AbstractRequestHandler):
         # Verifying if token was successfully obtained
         if not account_linking_token:
             logger.error("Unable to get token from Alexa Account Linking or AWS Functions environment variable.")
-            speak_output = globals().get("alexa_speak_error")
+            speak_output = pick_random_phrase("alexa_speak_error")
             return handler_input.response_builder.speak(speak_output).response
 
         # Check for a pre-set prompt from HA
@@ -126,7 +135,7 @@ class LaunchRequestHandler(AbstractRequestHandler):
         if prompt and prompt.lower() != "none":
             # Process this prompt as user input and keep session open for follow-up
             response = process_conversation(prompt)
-            return handler_input.response_builder.speak(response).ask(globals().get("alexa_speak_question")).response
+            return handler_input.response_builder.speak(response).ask(pick_random_phrase("alexa_speak_question")).response
 
         # No prompt and Checks if the device has a screen (APL support), if so, loads the interface
         device = handler_input.request_envelope.context.system.device
@@ -142,10 +151,10 @@ class LaunchRequestHandler(AbstractRequestHandler):
         # Sets the last access and defines which welcome phrase to respond to
         now = datetime.now(timezone(timedelta(hours=-3)))
         current_date = now.strftime('%Y-%m-%d')
-        speak_output = globals().get("alexa_speak_next_message")
+        speak_output = pick_random_phrase("alexa_speak_next_message")
         if last_interaction_date != current_date:
             # First run of the day
-            speak_output = globals().get("alexa_speak_welcome_message")
+            speak_output = pick_random_phrase("alexa_speak_welcome_message")
             last_interaction_date = current_date
 
         if suppress_greeting == "true":
@@ -170,7 +179,7 @@ def send_acknowledgment_sound(handler_input, request):
         logger.warning("Cannot send acknowledgment sound: missing request_id")
         return False
         
-    processing_msg = globals().get("alexa_speak_processing")
+    processing_msg = pick_random_phrase("alexa_speak_processing")
     if not processing_msg:
         logger.warning("Cannot send acknowledgment sound: missing alexa_speak_processing")
         return False
@@ -241,7 +250,7 @@ class GptQueryIntentHandler(AbstractRequestHandler):
 
         logger.debug(f"Ask for further commands enabled: {ask_for_further_commands}")
         if ask_for_further_commands == "true":
-            return response_builder.speak(response).ask(globals().get("alexa_speak_question")).response
+            return response_builder.speak(response).ask(pick_random_phrase("alexa_speak_question")).response
         else:
             return response_builder.speak(response).set_should_end_session(True).response
 
@@ -275,7 +284,7 @@ def process_conversation(query):
     # Gets user-configured environment variables
     if not home_assistant_url:
         logger.error("Please set 'home_assistant_url' AWS Lambda Functions environment variable.")
-        return globals().get("alexa_speak_error")
+        return pick_random_phrase("alexa_speak_error")
         
     try:
         headers = {
@@ -324,7 +333,7 @@ def process_conversation(query):
                     speech, is_ssml = extract_speech(response_data["response"]["speech"])
                     logger.error(f"Error code: {response_data['response']['data']['code']}")
                 else:
-                    speech = globals().get("alexa_speak_error")
+                    speech = pick_random_phrase("alexa_speak_error")
                     is_ssml = False
 
             if not speech:
@@ -334,7 +343,7 @@ def process_conversation(query):
                     return improve_response(f"{globals().get('alexa_speak_error')} {message}")
                 else:
                     logger.error(f"Empty speech: {response_data}")
-                    return globals().get("alexa_speak_error")
+                    return pick_random_phrase("alexa_speak_error")
 
             # If speech is SSML, return as-is; otherwise apply text improvements
             if is_ssml:
@@ -352,13 +361,13 @@ def process_conversation(query):
             else:
                 logger.error(f"HTTP error {response.status_code}: Unable to connect to your Home Assistant server. \n {response.text}")
                 
-            return globals().get("alexa_speak_error")
+            return pick_random_phrase("alexa_speak_error")
         elif  (contenttype == "text/plain") and int(response.status_code, 0) >= 400:
             logger.error(f"Error processing request: {response.text}")
-            return globals().get("alexa_speak_error")
+            return pick_random_phrase("alexa_speak_error")
         else:
             logger.error(f"Error processing request: {response.text}")
-            return globals().get("alexa_speak_error")
+            return pick_random_phrase("alexa_speak_error")
             
     except requests.exceptions.Timeout as te:
         logger.error(f"Timeout when communicating with Home Assistant: {str(te)}", exc_info=True)
@@ -366,7 +375,7 @@ def process_conversation(query):
 
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
-        return globals().get("alexa_speak_error")
+        return pick_random_phrase("alexa_speak_error")
 
 # Extract speech from Home Assistant response, preferring SSML over plain text
 def extract_speech(speech_data):
@@ -464,7 +473,7 @@ class HelpIntentHandler(AbstractRequestHandler):
         return ask_utils.is_intent_name("AMAZON.HelpIntent")(handler_input)
 
     def handle(self, handler_input):
-        speak_output = globals().get("alexa_speak_help")
+        speak_output = pick_random_phrase("alexa_speak_help")
         return handler_input.response_builder.speak(speak_output).ask(speak_output).response
 
 class CancelOrStopIntentHandler(AbstractRequestHandler):
@@ -501,7 +510,7 @@ class CatchAllExceptionHandler(AbstractExceptionHandler):
 
     def handle(self, handler_input, exception):
         logger.error(exception, exc_info=True)
-        speak_output = globals().get("alexa_speak_error")
+        speak_output = pick_random_phrase("alexa_speak_error")
         return handler_input.response_builder.speak(speak_output).ask(speak_output).response
 
 sb = CustomSkillBuilder(api_client=DefaultApiClient())
