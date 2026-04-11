@@ -1,17 +1,17 @@
 echo_screen_welcome_text=Willkommen bei Home Assistant!
-echo_screen_click_text=Klicken Sie auf die Schaltfläche unten, um Ihr Dashboard zu öffnen
+echo_screen_click_text=Tipp auf den Bildschirm für dein Dashboard
 echo_screen_button_text=Home Assistant öffnen
 
-alexa_speak_welcome_message=Willkommen beim Sprachassistenten von Home Assistant! Wie kann ich Ihnen helfen?
-alexa_speak_next_message=Hallo nochmal, wie kann ich Ihnen jetzt weiterhelfen?
-alexa_speak_question=Gibt es noch etwas?
-alexa_speak_help=Wie kann ich Ihnen behilflich sein?
-alexa_speak_exit=Bis bald!;Tschüss;Falls Sie mich benötigen, stehe ich Ihnen zur Verfügung;Okay, ich gehe dann mal;Danke;Alles klar;Danke, bis bald.;Ich bin dann mal weg, danke.
-alexa_speak_error=Entschuldigung, ich konnte Ihre Anfrage nicht verarbeiten.
-alexa_speak_timeout=Home Assistant hat zu lange gebraucht, um zu antworten. Bitte vereinfachen Sie den Befehl und versuchen Sie es erneut!
-alexa_speak_open_dashboard=Home Assistant wird geöffnet
-alexa_speak_processing="<speak>Einen Moment bitte, ich bin dran.</speak>"
+alexa_speak_welcome_message=Hey! Dein Haus-Assistent ist bereit. Was soll ich tun?;Hi! Was kann ich für dich erledigen?;Moin! Ich höre zu, was darf es sein?
+alexa_speak_next_message=Was gibts noch?;Sonst noch was?;Und weiter?;Bin noch da, was brauchst du?
+alexa_speak_question=Noch was?;Darf es noch etwas sein?;Brauchst du noch was?
+alexa_speak_help=Frag mich einfach, was du wissen willst, oder sag mir, was ich steuern soll!
+alexa_speak_exit=Bis dann!;Tschüss!;Alles klar, bis später!;Okay, mach's gut!;Ciao!;Na dann, bis zum nächsten Mal!;Läuft, ich bin dann weg!;Passt, bis bald!
+alexa_speak_error=Ups, da ging was schief. Versuch es nochmal!;Hmm, das hat nicht geklappt. Probier es nochmal!
+alexa_speak_timeout=Das dauert mir zu lang, sorry! Versuch es nochmal mit einem kürzeren Befehl.
+alexa_speak_open_dashboard=Alles klar, Dashboard kommt!
+alexa_speak_processing="<speak>Moment, ich kümmere mich drum.</speak>";"<speak>Sekunde, bin dran.</speak>";"<speak>Lass mich kurz nachdenken.</speak>";"<speak>Einen Moment, ich schau mal.</speak>";"<speak>Alles klar, ich check das kurz.</speak>";"<speak>Wird erledigt, Moment.</speak>"
 
-keywords_to_open_dashboard=öffne Dashboard; öffne Home Assistant
+keywords_to_open_dashboard=öffne Dashboard; öffne Home Assistant; zeig Dashboard; Dashboard
 
-keywords_to_close_skill=nein;nichts;das wars;danke
+keywords_to_close_skill=nein;nichts;das wars;danke;nö;passt;fertig;tschüss
