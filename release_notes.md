@@ -16,6 +16,7 @@
 - Fixed issue with keyword "no" inside a query/question
 - Add SSML support and README example intent (HelpIntent) #30 (thanks to [dezihh])
 - Added immediate confirmation response before forwarding request to LLM #31 (thanks to [dezihh])
+- Add random phrase selection for all locale messages #35 (thanks to [rwunsch])
 
 ---
 
@@ -37,3 +38,4 @@
 - Corrigido erro com a palavra chave "não" dentro de um comando/pergunta
 - Adicionado suporte a SSML com exemplo no README (HelpIntent) #30
 - Adicionado resposta de confirmação imediata antes de enviar para LLM #31
+- Adicionada seleção aleatória de frases para todas as mensagens de idioma #35 (thanks to [rwunsch])
