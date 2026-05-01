@@ -66,11 +66,9 @@ executor = ThreadPoolExecutor(max_workers=5)
 # Globals for conversation
 conversation_id = None
 last_interaction_date = None
-is_apl_supported = False
 account_linking_token = None
 user_locale = "US"  # Default locale
 home_assistant_url = os.environ.get('home_assistant_url', "").strip("/")
-apl_document_token = str(uuid.uuid4())
 assist_input_entity = os.environ.get('assist_input_entity', "input_text.assistant_input")
 home_assistant_agent_id = os.environ.get('home_assistant_agent_id', None)
 home_assistant_language = os.environ.get('home_assistant_language', None)
@@ -114,7 +112,7 @@ class LaunchRequestHandler(AbstractRequestHandler):
         return ask_utils.is_request_type("LaunchRequest")(handler_input)
 
     def handle(self, handler_input):
-        global conversation_id, last_interaction_date, is_apl_supported, account_linking_token, suppress_greeting
+        global conversation_id, last_interaction_date, account_linking_token, suppress_greeting
         
         localize(handler_input)
 
@@ -139,14 +137,37 @@ class LaunchRequestHandler(AbstractRequestHandler):
 
         # No prompt and Checks if the device has a screen (APL support), if so, loads the interface
         device = handler_input.request_envelope.context.system.device
-        is_apl_supported = device.supported_interfaces.alexa_presentation_apl is not None
-        logger.debug("Device: " + repr(device))
-        
-        # Renders the APL document with the button to open HA (if the device has a screen)
-        if is_apl_supported:
-            handler_input.response_builder.add_directive(
-                RenderDocumentDirective(token=apl_document_token, document=load_template("apl_openha.json"))
+        # Defensive: any missing attribute in the chain falls back to "no APL"
+        # so a malformed envelope doesn't break LaunchRequest on screen devices.
+        try:
+            is_apl_supported = (
+                getattr(getattr(device, "supported_interfaces", None),
+                        "alexa_presentation_apl", None)
+                is not None
             )
+        except Exception:
+            is_apl_supported = False
+
+        # Diagnostic at INFO so first-time Echo Show invocations leave a trace
+        # we can read in CloudWatch without flipping debug on.
+        request_locale = getattr(handler_input.request_envelope.request, "locale", None)
+        logger.info(
+            "LaunchRequest: locale=%s apl_supported=%s device=%r",
+            request_locale, is_apl_supported, device,
+        )
+
+        # Renders the APL document with the button to open HA (if the device has a screen).
+        # Wrapped: an APL render failure must NOT block the spoken welcome — that path
+        # is the most likely culprit for the skill appearing dead on Echo Show.
+        if is_apl_supported:
+            try:
+                # Per-render token avoids cross-session APL state confusion on Show.
+                render_token = str(uuid.uuid4())
+                handler_input.response_builder.add_directive(
+                    RenderDocumentDirective(token=render_token, document=load_template("apl_openha.json"))
+                )
+            except Exception as e:
+                logger.warning("APL render skipped (continuing with voice-only): %s", e, exc_info=True)
             
         # Sets the last access and defines which welcome phrase to respond to
         now = datetime.now(timezone(timedelta(hours=-3)))
@@ -427,34 +448,50 @@ def load_template(filepath):
         template = json.load(f)
 
     if filepath == 'apl_openha.json':
-        # Locate dynamic texts in the APL
-        template['mainTemplate']['items'][0]['items'][2]['text'] = globals().get("echo_screen_welcome_text")
-        template['mainTemplate']['items'][0]['items'][3]['text'] = globals().get("echo_screen_click_text")
-        template['mainTemplate']['items'][0]['items'][4]['onPress']['source'] = get_hadash_url()
-        template['mainTemplate']['items'][0]['items'][4]['item']['text'] = globals().get("echo_screen_button_text")
+        # Locate dynamic texts in the APL.
+        # Default to "" (never None) — APL rejects null text values, which would
+        # surface as a generic render error that's hard to diagnose post-hoc.
+        items = template['mainTemplate']['items'][0]['items']
+        items[2]['text'] = globals().get("echo_screen_welcome_text") or ""
+        items[3]['text'] = globals().get("echo_screen_click_text") or ""
+        items[4]['onPress']['source'] = get_hadash_url()
+        items[4]['item']['text'] = globals().get("echo_screen_button_text") or ""
 
     return template
 
 # Opens Home Assistant dashboard in Silk browser
 def open_page(handler_input):
-    if is_apl_supported:
+    # Derive APL support from the request envelope, not a module global —
+    # globals leak across users in warm Lambda containers.
+    device = handler_input.request_envelope.context.system.device
+    try:
+        apl_ok = (
+            getattr(getattr(device, "supported_interfaces", None),
+                    "alexa_presentation_apl", None)
+            is not None
+        )
+    except Exception:
+        apl_ok = False
+    if not apl_ok:
+        return
+
+    # Same token for both directives so ExecuteCommands targets the rendered doc.
+    token = str(uuid.uuid4())
+    try:
         # Renders an empty template, required for the OpenURL command
         # https://amazon.developer.forums.answerhub.com/questions/220506/alexa-open-a-browser.html
-        
         handler_input.response_builder.add_directive(
-            RenderDocumentDirective(
-                token=apl_document_token,
-                document=load_template("apl_empty.json")
-            )
+            RenderDocumentDirective(token=token, document=load_template("apl_empty.json"))
         )
-        
         # Open default page of dashboard
         handler_input.response_builder.add_directive(
             ExecuteCommandsDirective(
-                token=apl_document_token,
+                token=token,
                 commands=[OpenUrlCommand(source=get_hadash_url())]
             )
         )
+    except Exception as e:
+        logger.warning("open_page APL directives skipped: %s", e, exc_info=True)
 
 # Builds the Home Assistant dashboard URL
 def get_hadash_url():
