@@ -3,21 +3,31 @@
 Action items derived from the security & quality review of [`lambda_functions/lambda_function.py`](lambda_functions/lambda_function.py).
 Priority levels: 🔴 critical · 🟠 high · 🟡 medium · 🟢 low.
 
-## Status (2026-05-01)
+## Status
 
-| Item | Status | Branch / commit |
-|------|--------|-----------------|
-| #1 globals leak across users | ✅ Resolved | `fix/echo-show-defensive-launch` (partial: `is_apl_supported`, `apl_document_token`) + `fix/critical-and-high-security` `ef3e83e` (rest) |
-| #2 `load_config` writes to `globals()` | ✅ Resolved | `fix/critical-and-high-security` `ef3e83e` |
-| #3 unvalidated locale field | ✅ Resolved | `ef3e83e` |
-| #4 missing HA POST timeout | ✅ Resolved | `ef3e83e` |
-| #5 HTTPS not enforced | ✅ Resolved | `ef3e83e` |
-| #6 `debug` truthiness bug | ✅ Resolved | `ef3e83e` (also removed env-var token fallback) |
-| #13 logger used before init | ✅ Resolved (incidental) | `ef3e83e` |
-| #15 `globals().get(keywords_*)` `None.split` crash | ✅ Resolved (incidental) | `ef3e83e` |
-| #7–#12, #14, #16–#21 | Open | — |
+All work lives on the `improved` branch.
 
-Branches not yet merged into `main`. Code below still cites pre-fix line numbers.
+| Item | Status |
+|------|--------|
+| #1 globals leak across users | ✅ Resolved |
+| #2 `load_config` writes to `globals()` | ✅ Resolved |
+| #3 unvalidated locale field | ✅ Resolved |
+| #4 missing HA POST timeout | ✅ Resolved |
+| #5 HTTPS not enforced | ✅ Resolved |
+| #6 `debug` truthiness bug | ✅ Resolved (also removed env-var token fallback) |
+| #7 debug logs include full HA payloads | ✅ Resolved |
+| #8 dead `int(status_code, 0)` branches | ✅ Resolved (incidental) |
+| #9 deprecated GH Actions | ✅ Resolved (migrated to `softprops/action-gh-release@v2`) |
+| #10 unpinned dependencies | ✅ Resolved (`requests==2.32.3` pinned) |
+| #11 .gitignore audit | ✅ Resolved (1801 → 48 lines, pattern-based) |
+| #13 logger used before init | ✅ Resolved (incidental) |
+| #15 `globals().get(keywords_*)` `None.split` crash | ✅ Resolved (incidental) |
+| #16 hardcoded Brazilian timezone | ✅ Resolved (incidental — daily-greeting feature removed) |
+| #21 APL token reuse | ✅ Resolved (incidental) |
+| #12, #14, #17–#20 | Open (code-quality, not security) |
+
+`improved` branch is not yet merged into `main`. Code below still cites
+pre-fix line numbers from the original `main`.
 
 ---
 
@@ -57,27 +67,27 @@ Branches not yet merged into `main`. Code below still cites pre-fix line numbers
 - **Problem:** `bool(os.environ.get('debug', False))` is `True` for any non-empty string, including the literal `"False"`. Debug mode also bypasses Alexa account linking ([:124](lambda_functions/lambda_function.py)) → if accidentally on in prod, every user shares the env-var token.
 - **Fix:** `debug = os.environ.get('debug', '').strip().lower() == 'true'` (matches the pattern used for the other flags). Consider removing the env-var token fallback entirely — or gate it behind a separate explicit flag.
 
-### 🟡 7. Don't log full HA payloads at debug
+### 🟡 7. Don't log full HA payloads at debug ✅ Resolved
 - **Where:** [lambda_function.py:307-312](lambda_functions/lambda_function.py)
 - **Problem:** `logger.debug(f"HA response data: {response.text}")` logs every HA response to CloudWatch. May contain room layout, presence info, sensor readings.
 - **Fix:** Log only metadata (status, content-type, length); redact bodies in debug, or move body logs behind a separate `verbose_debug` flag off by default.
 
-### 🟡 8. Remove dead/buggy `int(response.status_code, 0)` calls
+### 🟡 8. Remove dead/buggy `int(response.status_code, 0)` calls ✅ Resolved (incidental, via `ef3e83e` rewrite)
 - **Where:** [lambda_function.py:355,365](lambda_functions/lambda_function.py)
 - **Problem:** `response.status_code` is already `int`; `int(int_value, base)` raises `TypeError`. Those branches never execute as intended; everything falls to the generic else.
 - **Fix:** Drop the wrapper: `if contenttype == "text/html" and response.status_code >= 400:`.
 
-### 🟡 9. Modernize GitHub Actions release workflow
+### 🟡 9. Modernize GitHub Actions release workflow ✅ Resolved
 - **Where:** [.github/workflows/release.yml](.github/workflows/release.yml)
 - **Problem:** Uses archived `actions/create-release@v1` and `actions/upload-release-asset@v1` (deprecated 2021).
 - **Fix:** Migrate to `softprops/action-gh-release@v2`. Pin third-party actions to a SHA. Set `permissions: contents: read` at workflow level, narrow to `write` only on the release job.
 
-### 🟡 10. Pin and monitor dependencies
+### 🟡 10. Pin and monitor dependencies ✅ Resolved (Dependabot enrolment is a separate follow-up)
 - **Where:** [lambda_functions/requirements.txt](lambda_functions/requirements.txt)
 - **Problem:** `requests>=2.26.0` unbounded; `ask-sdk-core==1.19.0` is years out of date.
 - **Fix:** Pin exact versions. Enable Dependabot. Plan an `ask-sdk-core` upgrade after adding tests.
 
-### 🟢 11. Audit the giant `.gitignore`
+### 🟢 11. Audit the giant `.gitignore` ✅ Resolved
 - **Where:** [.gitignore](.gitignore) (147 KB)
 - **Action:** Confirm everything in there is intentional; trim anything irrelevant.
 
@@ -103,7 +113,7 @@ Branches not yet merged into `main`. Code below still cites pre-fix line numbers
 - **Where:** [lambda_function.py:260,267](lambda_functions/lambda_function.py)
 - **Fix:** Use `LOCALE_STRINGS.get(key, "")` (after #2) before splitting.
 
-### 🟡 16. Hardcoded Brazilian timezone
+### 🟡 16. Hardcoded Brazilian timezone ✅ Resolved (incidental — daily-greeting feature removed in `ef3e83e`)
 - **Where:** [lambda_function.py:152](lambda_functions/lambda_function.py)
 - **Problem:** `timezone(timedelta(hours=-3))` for "first run of the day" — wrong for everyone outside UTC-3.
 - **Fix:** Use `timezone.utc`, or derive from the Alexa request's `timestamp`/`device.timezone`.
@@ -133,15 +143,11 @@ Branches not yet merged into `main`. Code below still cites pre-fix line numbers
 
 ---
 
-## Remaining order to attack (after #1–#6 land)
+## Remaining (code-quality only — no security findings open)
 
-1. #8 — kill the dead `int(status_code, 0)` branches (one-line fix).
-2. #7 — redact HA payloads from debug logs.
-3. #14 — defensive `.get()` chains on HA response shape.
-4. #16 — drop the hardcoded Brazilian timezone (or remove the daily-greeting feature, which `ef3e83e` already did).
-5. #17 — `urljoin` + `urlencode` for URL building.
-6. #9 + #10 — modernize GH Actions release workflow + pin deps.
-7. #18 — add minimal `pytest` suite.
-8. #12, #19 — drop fake-async, replace `globals()` config pattern with a typed config object.
-9. #20 — CI lint/format/test gate.
-10. #11 — audit the giant `.gitignore`.
+1. #14 — defensive `.get()` chains on HA response shape.
+2. #17 — `urljoin` + `urlencode` for URL building (the `?kiosk` blind-append edge case).
+3. #18 — add minimal `pytest` suite (covers happy-path `process_conversation`, `extract_speech`, `improve_response`, `keywords_exec`).
+4. #12 — drop the fake-async wrapper (`run_async_in_executor`) or convert to real async with `aiohttp`.
+5. #19 — replace remaining env-var parsing with a typed config object (`pydantic.BaseSettings` or `@dataclass`).
+6. #20 — CI lint/format/test gate (`ruff check`, `ruff format --check`, `pytest`).

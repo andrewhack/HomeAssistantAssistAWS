@@ -361,16 +361,25 @@ def process_conversation(query, account_linking_token, user_locale, conversation
             data["conversation_id"] = conversation_id_in
 
         ha_api_url = "{}/api/conversation/process".format(home_assistant_url)
-        logger.debug(f"HA request url: {ha_api_url}")
-        logger.debug(f"HA request data: {data}")
+        # Log metadata only. Bodies can contain room layout, presence info,
+        # sensor readings, and PII from conversation agents — CloudWatch
+        # retention defaults to forever, so don't dump bodies into logs.
+        logger.debug(
+            "HA request url=%s text_len=%d has_language=%s has_agent_id=%s has_conv_id=%s",
+            ha_api_url,
+            len(data.get("text", "")),
+            "language" in data,
+            "agent_id" in data,
+            "conversation_id" in data,
+        )
 
         response = requests.post(ha_api_url, headers=headers, json=data, timeout=HA_HTTP_TIMEOUT)
 
-        logger.debug(f"HA response status: {response.status_code}")
-        logger.debug(f"HA response data: {response.text}")
-
         contenttype = response.headers.get('Content-Type', '')
-        logger.debug(f"Content-Type: {contenttype}")
+        logger.debug(
+            "HA response status=%d content_type=%s body_len=%d",
+            response.status_code, contenttype, len(response.text),
+        )
 
         new_conv_id = None
         if contenttype == "application/json":
