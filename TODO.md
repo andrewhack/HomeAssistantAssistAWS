@@ -3,11 +3,27 @@
 Action items derived from the security & quality review of [`lambda_functions/lambda_function.py`](lambda_functions/lambda_function.py).
 Priority levels: 🔴 critical · 🟠 high · 🟡 medium · 🟢 low.
 
+## Status (2026-05-01)
+
+| Item | Status | Branch / commit |
+|------|--------|-----------------|
+| #1 globals leak across users | ✅ Resolved | `fix/echo-show-defensive-launch` (partial: `is_apl_supported`, `apl_document_token`) + `fix/critical-and-high-security` `ef3e83e` (rest) |
+| #2 `load_config` writes to `globals()` | ✅ Resolved | `fix/critical-and-high-security` `ef3e83e` |
+| #3 unvalidated locale field | ✅ Resolved | `ef3e83e` |
+| #4 missing HA POST timeout | ✅ Resolved | `ef3e83e` |
+| #5 HTTPS not enforced | ✅ Resolved | `ef3e83e` |
+| #6 `debug` truthiness bug | ✅ Resolved | `ef3e83e` (also removed env-var token fallback) |
+| #13 logger used before init | ✅ Resolved (incidental) | `ef3e83e` |
+| #15 `globals().get(keywords_*)` `None.split` crash | ✅ Resolved (incidental) | `ef3e83e` |
+| #7–#12, #14, #16–#21 | Open | — |
+
+Branches not yet merged into `main`. Code below still cites pre-fix line numbers.
+
 ---
 
 ## Security
 
-### 🔴 1. Stop sharing user state via module globals
+### 🔴 1. Stop sharing user state via module globals ✅ Resolved (`6fe241a` + `ef3e83e`)
 - **Where:** [lambda_function.py:67-81](lambda_functions/lambda_function.py)
 - **Problem:** `account_linking_token`, `conversation_id`, `last_interaction_date`, `is_apl_supported`, `user_locale` are module-level globals. AWS Lambda containers are reused across invocations and across different end users → User A's bearer token / conversation context can leak into User B's request when invocations interleave (provisioned concurrency, the `ThreadPoolExecutor` path, or simply a warm container handling a different user next).
 - **Fix:**
@@ -16,27 +32,27 @@ Priority levels: 🔴 critical · 🟠 high · 🟡 medium · 🟢 low.
   - Persist `last_interaction_date` in `persistent_attributes` keyed by `userId` (or just drop the "first run of the day" greeting if not worth the dependency).
   - Compute `is_apl_supported` per request from `handler_input.request_envelope.context.system.device`.
 
-### 🔴 2. `load_config` can overwrite arbitrary module globals
+### 🔴 2. `load_config` can overwrite arbitrary module globals ✅ Resolved (`ef3e83e`)
 - **Where:** [lambda_function.py:39-52](lambda_functions/lambda_function.py)
 - **Problem:** Every `name=value` line in a `.lang` file is written into `globals()[name]`. A line like `home_assistant_url=http://attacker.example` in a locale file silently overrides runtime config. No allowlist.
 - **Fix:** Load into a dedicated dict (`LOCALE_STRINGS: dict[str, str] = {}`); replace every `globals().get("alexa_speak_*")` with `LOCALE_STRINGS.get(...)`.
 
-### 🟠 3. Validate the `locale` request field
+### 🟠 3. Validate the `locale` request field ✅ Resolved (`ef3e83e`)
 - **Where:** [lambda_function.py:106](lambda_functions/lambda_function.py)
 - **Problem:** `load_config(f"locale/{locale}.lang")` uses an untrusted request field as part of a file path. Today Alexa restricts the value, but the code shouldn't depend on that.
 - **Fix:** Allowlist the locales actually shipped in `lambda_functions/locale/`; fall back to `en-US` on mismatch.
 
-### 🟠 4. Add timeout to the main HA POST
+### 🟠 4. Add timeout to the main HA POST ✅ Resolved (`ef3e83e`)
 - **Where:** [lambda_function.py:309](lambda_functions/lambda_function.py)
 - **Problem:** No timeout on `requests.post(...)`. A slow/hung HA hangs Lambda until its hard limit.
 - **Fix:** `requests.post(ha_api_url, headers=headers, json=data, timeout=(5, 25))`. The existing `Timeout` exception handler will then actually fire.
 
-### 🟠 5. Enforce HTTPS on `home_assistant_url`
+### 🟠 5. Enforce HTTPS on `home_assistant_url` ✅ Resolved (`ef3e83e`)
 - **Where:** [lambda_function.py:72](lambda_functions/lambda_function.py)
 - **Problem:** A misconfigured `http://` URL exposes the Bearer token in cleartext.
 - **Fix:** Validate scheme at cold start; refuse to start (or log error and return generic failure) if not `https://`.
 
-### 🟠 6. `debug` env flag has the `bool("False") == True` bug
+### 🟠 6. `debug` env flag has the `bool("False") == True` bug ✅ Resolved (`ef3e83e`)
 - **Where:** [lambda_function.py:58](lambda_functions/lambda_function.py)
 - **Problem:** `bool(os.environ.get('debug', False))` is `True` for any non-empty string, including the literal `"False"`. Debug mode also bypasses Alexa account linking ([:124](lambda_functions/lambda_function.py)) → if accidentally on in prod, every user shares the env-var token.
 - **Fix:** `debug = os.environ.get('debug', '').strip().lower() == 'true'` (matches the pattern used for the other flags). Consider removing the env-var token fallback entirely — or gate it behind a separate explicit flag.
@@ -74,7 +90,7 @@ Priority levels: 🔴 critical · 🟠 high · 🟡 medium · 🟢 low.
 - **Problem:** `run_async_in_executor` spins up a new asyncio event loop per call to wrap a synchronous `requests` call. The README claim of "async calls" isn't delivered. Lambda runs single-request-per-container anyway.
 - **Fix:** Either remove (call `process_conversation` directly) or convert to real async with `aiohttp`.
 
-### 🟡 13. Logger used before initialization
+### 🟡 13. Logger used before initialization ✅ Resolved (`ef3e83e`, incidental)
 - **Where:** initial [`load_config("locale/en-US.lang")`](lambda_functions/lambda_function.py) at line 55 runs before `logger` is created at line 59.
 - **Fix:** Move logger init to top of file (right after imports).
 
@@ -83,7 +99,7 @@ Priority levels: 🔴 critical · 🟠 high · 🟡 medium · 🟢 low.
 - **Problem:** `response_data["response"]["response_type"]` and `["data"]["code"]` crash on unexpected shapes.
 - **Fix:** `.get()` chains with sensible fallbacks.
 
-### 🟡 15. `globals().get("keywords_*")` returns `None` → `.split` crashes
+### 🟡 15. `globals().get("keywords_*")` returns `None` → `.split` crashes ✅ Resolved (`ef3e83e`, incidental)
 - **Where:** [lambda_function.py:260,267](lambda_functions/lambda_function.py)
 - **Fix:** Use `LOCALE_STRINGS.get(key, "")` (after #2) before splitting.
 
@@ -110,18 +126,22 @@ Priority levels: 🔴 critical · 🟠 high · 🟡 medium · 🟢 low.
 ### 🟢 20. CI lint/format/test gate
 - **Action:** Add `ruff check`, `ruff format --check`, `pytest` steps to the release workflow before the zip step.
 
-### 🟢 21. APL token reuse
+### 🟢 21. APL token reuse ✅ Resolved (`6fe241a`, incidental)
 - **Where:** [lambda_function.py:73](lambda_functions/lambda_function.py)
 - **Problem:** `apl_document_token = str(uuid.uuid4())` generated once at import, reused for every user/session. Cosmetic, not a security issue.
 - **Fix:** Generate per-handler call.
 
 ---
 
-## Suggested order to attack
+## Remaining order to attack (after #1–#6 land)
 
-1. #1 (multi-user state) — biggest impact, most invasive change.
-2. #2 (`globals()` config) — pairs naturally with #1.
-3. #4 + #5 + #6 — small, isolated security wins.
-4. #8 — kill the dead branch.
-5. #9 + #10 — supply chain + CI.
-6. #18 — tests, before larger refactors (#12, #19).
+1. #8 — kill the dead `int(status_code, 0)` branches (one-line fix).
+2. #7 — redact HA payloads from debug logs.
+3. #14 — defensive `.get()` chains on HA response shape.
+4. #16 — drop the hardcoded Brazilian timezone (or remove the daily-greeting feature, which `ef3e83e` already did).
+5. #17 — `urljoin` + `urlencode` for URL building.
+6. #9 + #10 — modernize GH Actions release workflow + pin deps.
+7. #18 — add minimal `pytest` suite.
+8. #12, #19 — drop fake-async, replace `globals()` config pattern with a typed config object.
+9. #20 — CI lint/format/test gate.
+10. #11 — audit the giant `.gitignore`.
