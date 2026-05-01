@@ -14,9 +14,21 @@ import asyncio
 import uuid
 from urllib.parse import urlparse
 
+from datetime import datetime, timezone
+
 import requests
 import requests.exceptions
 import ask_sdk_core.utils as ask_utils
+
+# boto3 is bundled with the AWS Lambda Python runtime — no extra dependency
+# in requirements.txt. Imported lazily inside the persistence helpers so
+# unit tests / cold-start probes don't need it on the path.
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+except ImportError:  # pragma: no cover — only outside Lambda
+    boto3 = None
+    ClientError = Exception
 
 from ask_sdk_core.skill_builder import CustomSkillBuilder
 from ask_sdk_core.api_client import DefaultApiClient
@@ -104,6 +116,107 @@ enable_acknowledgment_sound = str(os.environ.get('enable_acknowledgment_sound', 
 # HA instance hangs Lambda all the way to its hard limit.
 HA_HTTP_TIMEOUT = (5, 25)
 
+# ---------------------------------------------------------------------------
+# Optional cross-session persistence (DynamoDB).
+#
+# When `persistence_table_name` env var is set, conversation_id is persisted
+# across Alexa sessions so HA's conversation agent has memory between
+# invocations of the skill. Schema (matching ask-sdk's DynamoDbAdapter
+# defaults so a future migration is trivial):
+#   - Partition key: id (string), value = Alexa user_id
+#   - Item:          attributes (map)
+#
+# Continuity window: if the user invokes again within this many minutes,
+# resume the previous conversation_id. Older records are treated as stale
+# and a fresh conversation starts.
+# ---------------------------------------------------------------------------
+persistence_table_name = os.environ.get('persistence_table_name', '').strip()
+try:
+    conversation_continuity_minutes = int(os.environ.get('conversation_continuity_minutes', '5'))
+except ValueError:
+    conversation_continuity_minutes = 5
+
+_ddb_table = None
+if persistence_table_name and boto3 is not None:
+    try:
+        _ddb_table = boto3.resource('dynamodb').Table(persistence_table_name)
+        logger.info("Persistence enabled: table=%s continuity=%dmin",
+                    persistence_table_name, conversation_continuity_minutes)
+    except Exception as e:
+        logger.error("Failed to initialize DynamoDB resource: %s", e)
+        _ddb_table = None
+elif persistence_table_name:
+    logger.warning("persistence_table_name set but boto3 unavailable; running without persistence.")
+
+
+def _persistent_load(user_id):
+    """Read persistent attributes for an Alexa user. Returns {} on miss/failure."""
+    if not _ddb_table or not user_id:
+        return {}
+    try:
+        resp = _ddb_table.get_item(Key={'id': user_id})
+        return resp.get('Item', {}).get('attributes', {}) or {}
+    except ClientError as e:
+        logger.error("DDB get_item failed: %s", e)
+        return {}
+
+
+def _persistent_save(user_id, attrs):
+    """Write persistent attributes for an Alexa user. Best-effort."""
+    if not _ddb_table or not user_id:
+        return
+    try:
+        _ddb_table.put_item(Item={'id': user_id, 'attributes': attrs})
+    except ClientError as e:
+        logger.error("DDB put_item failed: %s", e)
+
+
+def _resume_conversation_id(persistent_attrs):
+    """Return previous conversation_id only if within the continuity window."""
+    last_id = persistent_attrs.get('conversation_id')
+    last_at = persistent_attrs.get('conversation_at')
+    if not last_id or not last_at:
+        return None
+    try:
+        last_dt = datetime.fromisoformat(last_at)
+    except (TypeError, ValueError):
+        return None
+    age_min = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60.0
+    if age_min <= conversation_continuity_minutes:
+        return last_id
+    return None
+
+
+def _record_conversation(persistent_attrs, conversation_id):
+    """Update persistent attrs with the latest conversation_id and timestamp."""
+    persistent_attrs['conversation_id'] = conversation_id
+    persistent_attrs['conversation_at'] = datetime.now(timezone.utc).isoformat()
+
+
+def _user_id(handler_input):
+    return getattr(getattr(handler_input.request_envelope.context.system, "user", None),
+                   "user_id", None)
+
+
+def clear_prompt_in_ha(account_linking_token):
+    """Reset the assist_input_entity to 'none' after consuming a prompt so
+    the same question doesn't replay on the user's next invocation. Best-effort
+    — failures are logged but not surfaced to the user."""
+    if not _HA_URL_OK or not account_linking_token:
+        return
+    try:
+        url = f"{home_assistant_url}/api/services/input_text/set_value"
+        headers = {
+            "Authorization": "Bearer {}".format(account_linking_token),
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": assist_input_entity, "value": "none"}
+        resp = requests.post(url, headers=headers, json=payload, timeout=HA_HTTP_TIMEOUT)
+        if resp.status_code >= 400:
+            logger.warning("Could not clear prompt entity: %d %s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.warning("clear_prompt_in_ha failed: %s", e)
+
 # Validate the HA URL scheme at cold start. http:// would transmit the per-user
 # Bearer token in cleartext — refuse to send the request later if so.
 def _validate_ha_url():
@@ -186,15 +299,31 @@ class LaunchRequestHandler(AbstractRequestHandler):
             speak_output = pick_random_phrase("alexa_speak_error")
             return handler_input.response_builder.speak(speak_output).response
 
+        # Cross-session conversation continuity (optional, DynamoDB-backed).
+        # If the user invoked recently, resume the same HA conversation_id so
+        # the conversation agent retains memory across "Alexa, ask smart assist"
+        # invocations. Disabled when persistence_table_name env var is unset.
+        user_id = _user_id(handler_input)
+        persistent_attrs = _persistent_load(user_id)
+        resumed = _resume_conversation_id(persistent_attrs)
+        if resumed and not session.get("conversation_id"):
+            session["conversation_id"] = resumed
+            logger.info("Resumed conversation_id from persistent store (within continuity window).")
+
         # Pre-set prompt path: HA can push a question into Alexa via input_text helper.
         prompt = fetch_prompt_from_ha(account_linking_token)
         if prompt and prompt.lower() != "none":
+            session["started_from_ha_prompt"] = True
             speech, new_conv_id = process_conversation(
                 prompt, account_linking_token, user_locale,
                 session.get("conversation_id"),
             )
             if new_conv_id:
                 session["conversation_id"] = new_conv_id
+                _record_conversation(persistent_attrs, new_conv_id)
+                _persistent_save(user_id, persistent_attrs)
+            # Reset the prompt entity so the question doesn't replay next time.
+            clear_prompt_in_ha(account_linking_token)
             return handler_input.response_builder.speak(speech).ask(
                 pick_random_phrase("alexa_speak_question")
             ).response
@@ -305,9 +434,23 @@ class GptQueryIntentHandler(AbstractRequestHandler):
         )
         if new_conv_id:
             session["conversation_id"] = new_conv_id
+            user_id = _user_id(handler_input)
+            persistent_attrs = _persistent_load(user_id)
+            _record_conversation(persistent_attrs, new_conv_id)
+            _persistent_save(user_id, persistent_attrs)
 
         logger.debug(f"Ask for further commands enabled: {ask_for_further_commands}")
         if ask_for_further_commands == "true":
+            # Mid-session prompt re-poll: HA can inject a follow-up question
+            # while the user is still in the conversation. If the input_text
+            # helper has fresh content, append it to the spoken response so
+            # the user hears it as part of the same turn.
+            mid_prompt = fetch_prompt_from_ha(account_linking_token)
+            if mid_prompt and mid_prompt.lower() != "none":
+                # Use a soft connective so the two pieces don't run together.
+                connective = pick_random_phrase("alexa_speak_also") or " Also, "
+                speech = f"{speech} {connective} {mid_prompt}"
+                clear_prompt_in_ha(account_linking_token)
             return response_builder.speak(speech).ask(pick_random_phrase("alexa_speak_question")).response
         return response_builder.speak(speech).set_should_end_session(True).response
 
